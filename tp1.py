@@ -8,34 +8,45 @@ class Image_processing():
     
     def __init__(self):
         self.n = mp.cpu_count()
-        self.image = 0
+        self.image = None
         self.length = 0
-        self.higth = 0
+        self.height = 0
+        self.divisions = []
         
     def search_image(self):
-        # Abre un cuadro de diálogo para seleccionar una imagen
         file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
-        
         if file_path:
-            # Cargar la imagen usando Pillow
             image = Image.open(file_path)
             self.image = image
-            self.length, self.higth = self.image.size
-            
-# Uso de la función (por ejemplo, dentro de una clase)
-# image = self.search_image()
-# image.show()  # Esto mostrará la imagen seleccionada
+            self.length, self.height = self.image.size
 
-    def filter(self,division):
-        return division.filter(ImageFilter.GaussianBlur(5))
+    def filter(self, division):
+        return division.filter(ImageFilter.CONTOUR)
     
     def division(self):
-        division_higth = self.higth//self.n
+        division_height = self.height // self.n
         divisions = []
         for i in range(self.n):
-            y_init = i*division_higth
-            y_end = (i+1)*division_higth if i != division_higth else self.higth
-            divisions.append(self.image.crop((0,y_init,self.length,y_end)))
-        return divisions 
+            y_init = i * division_height
+            y_end = (i + 1) * division_height if (i + 1) * division_height <= self.height else self.height
+            divisions.append(self.image.crop((0, y_init, self.length, y_end)))
+        self.divisions = divisions 
+
+    def join_images(self, processed_divisions):
+        new_image = Image.new('RGB', (self.length, self.height))
+        i = 0
+        for division in processed_divisions:
+            new_image.paste(division, (0, i))
+            i += division.size[1]
+        return new_image
+
+    def image_processing(self):
+        with mp.Pool(self.n) as pool:
+            processed_images = pool.map(self.filter, self.divisions)
+        final_image = self.join_images(processed_images)
+        final_image.save("processed_image.png")
     
-     
+    def run(self):
+        self.search_image()
+        self.division()
+        self.image_processing()

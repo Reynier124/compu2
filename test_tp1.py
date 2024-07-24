@@ -1,6 +1,6 @@
 # test_tp1.py
 import unittest
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch, MagicMock, call
 from PIL import Image, ImageFilter
 from tp1 import Image_processing
 
@@ -11,60 +11,71 @@ class Tests_Image_processing(unittest.TestCase):
     @patch('tp1.filedialog.askopenfilename')
     @patch('tp1.Image.open')
     def test_search_image(self, mock_open, mock_askopenfilename):
-        # Configurar el mock para devolver una ruta de archivo falsa
         mock_askopenfilename.return_value = "fake_path.png"
-        
-        # Crear una imagen simulada
         mock_image = MagicMock()
         mock_image.size = (100, 200)
         mock_open.return_value = mock_image
         
-        # Ejecutar la función
         self.process.search_image()
         
-        # Verificar que se llamó a askopenfilename y open con la ruta correcta
         mock_askopenfilename.assert_called_once_with(filetypes=[("Image files", "*.jpg *.jpeg *.png")])
         mock_open.assert_called_once_with("fake_path.png")
-        
-        # Verificar que la imagen y sus dimensiones se asignaron correctamente
         self.assertEqual(self.process.image, mock_image)
         self.assertEqual(self.process.length, 100)
-        self.assertEqual(self.process.higth, 200)
+        self.assertEqual(self.process.height, 200)
 
-    def test_filter(self):
-        # Crear una imagen simulada
-        mock_image = MagicMock()
-        
-        # Ejecutar la función de filtro
+    @patch('tp1.Image.Image.filter')
+    def test_filter(self, mock_filter):
+        mock_image = MagicMock(spec=Image.Image)
+        mock_filter.return_value = mock_image
         filtered_image = self.process.filter(mock_image)
-        
-        # Verificar que se llamó a filter con el filtro correcto
-        mock_image.filter.assert_called_once_with(ANY)
+        mock_filter.assert_called_once_with(ImageFilter.CONTOUR)
     
-    @patch.object(Image_processing, 'image', new_callable=MagicMock)
-    def test_division(self, mock_image):
-        # Configurar el tamaño de la imagen
+    def test_division(self):
+        self.process.image = MagicMock(spec=Image.Image)
+        self.process.image.size = (100, 200)
         self.process.length = 100
-        self.process.higth = 200
+        self.process.height = 200
         self.process.n = 4
         
-        # Configurar el mock para la función crop
-        mock_image.size = (100, 200)
-        mock_image.crop.side_effect = lambda box: f"Crop({box})"
+        def mock_crop(box):
+            return MagicMock(spec=Image.Image)
         
-        # Ejecutar la función de división
-        divisions = self.process.division()
+        self.process.image.crop = mock_crop
         
-        # Verificar las divisiones esperadas
-        expected_divisions = [
-            'Crop((0, 0, 100, 50))',
-            'Crop((0, 50, 100, 100))',
-            'Crop((0, 100, 100, 150))',
-            'Crop((0, 150, 100, 200))'
+        # Ejecuta la división
+        self.process.division()
+        
+        # Verifica las llamadas al método crop
+        expected_calls = [
+            call((0, 0, 100, 50)),
+            call((0, 50, 100, 100)),
+            call((0, 100, 100, 150)),
+            call((0, 150, 100, 200))
         ]
+        actual_calls = self.process.image.crop.call_args_list
+        self.assertEqual(actual_calls, expected_calls)
+
+    @patch('tp1.Image_processing.division')
+    @patch('tp1.Image_processing.filter')
+    @patch('PIL.Image.Image.save')
+    def test_image_processing(self, mock_save, mock_filter, mock_division):
+        # Configura los mocks
+        mock_division.return_value = [MagicMock(spec=Image.Image) for _ in range(self.process.n)]
+        mock_filter.return_value = MagicMock(spec=Image.Image)
+        mock_save.return_value = None
         
-        self.assertEqual(divisions, expected_divisions)
-        self.assertEqual(mock_image.crop.call_count, 4)
+        # Ejecuta el procesamiento de la imagen
+        self.process.image_processing()
+        
+        # Verifica que division fue llamada
+        mock_division.assert_called_once()
+        
+        # Verifica que filter fue llamada con cada división
+        self.assertEqual(mock_filter.call_count, self.process.n)
+        
+        # Verifica que save fue llamada
+        mock_save.assert_called_once_with("processed_image.png")
 
 if __name__ == '__main__':
     unittest.main()
