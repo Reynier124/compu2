@@ -31,36 +31,40 @@ class ImageProcessing:
             for i in range(self.n)
         ]
 
-    def join_images(self, processed_divisions):
-        total_height = sum([division.size[1] for division in processed_divisions])
+    def join_images(self, shared_array):
+        total_height = sum([self.divisions[i].size[1] for i in range(self.n)])
         new_image = Image.new('RGB', (self.length, total_height))
         y_offset = 0
-        for division in processed_divisions:
+        for i in range(self.n):
+            division_bytes = bytes(shared_array[i * self.length * self.divisions[i].size[1] * 3:(i + 1) * self.length * self.divisions[i].size[1] * 3])
+            division = Image.frombytes('RGB', (self.length, self.divisions[i].size[1]), division_bytes)
             new_image.paste(division, (0, y_offset))
             y_offset += division.size[1]
         new_image.save("processed_image.png")
 
     def image_processing(self):
         queue = mp.Queue()
+        shared_array = mp.Array('B', self.length * self.height * 3) 
 
         def worker(division, index):
             processed_image = self.filter(division)
-            queue.put((index, processed_image))
-
+            division_bytes = processed_image.tobytes()
+            start = index * self.length * division.size[1] * 3
+            shared_array[start:start + len(division_bytes)] = division_bytes
+            queue.put(index)  
+            
         for i, division in enumerate(self.divisions):
             p = mp.Process(target=worker, args=(division, i))
             self.processes.append(p)
             p.start()
 
-        processed_divisions = [None] * self.n
         for _ in range(self.n):
-            index, processed_image = queue.get()
-            processed_divisions[index] = processed_image
+            queue.get()  
 
         for p in self.processes:
             p.join()
 
-        self.join_images(processed_divisions)
+        self.join_images(shared_array)
 
     def cleanup(self, signum, frame):
         print("Interrupt received, cleaning up...")
