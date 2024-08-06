@@ -1,14 +1,12 @@
 import multiprocessing as mp
-from multiprocessing import shared_memory
 from PIL import Image, ImageFilter
 import sys
 import signal
-import time
 from tkinter import filedialog
-import os
+import mmap
+import numpy as np
 
 class ImageProcessing:
-
     def __init__(self):
         self.n = mp.cpu_count()
         self.image = None
@@ -25,7 +23,7 @@ class ImageProcessing:
 
     def filter(self, division):
         return division.filter(ImageFilter.CONTOUR)
-    
+
     def division(self):
         division_height = self.height // self.n
         self.divisions = [
@@ -33,51 +31,64 @@ class ImageProcessing:
             for i in range(self.n)
         ]
 
-    def join_images(self, shared_mem_name):
-        total_height = sum([self.divisions[i].size[1] for i in range(self.n)])
-        new_image = Image.new('RGB', (self.length, total_height))
+    def join_images(self, shared_mmap, queue):
+        new_image = Image.new('RGB', (self.length, self.height))
         y_offset = 0
+        
+        for _ in range(self.n):
+            index = queue.get()
+            division_height = self.divisions[index].size[1]
+            division_size = self.length * division_height * 3
+            start = index * division_size
+            end = start + division_size
 
-        existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
-        shared_array = existing_shm.buf
+            if end > len(shared_mmap):
+                end = len(shared_mmap)  # Ensure end does not exceed the mmap size
 
-        for i in range(self.n):
-            division_bytes = bytes(shared_array[i * self.length * self.divisions[i].size[1] * 3:(i + 1) * self.length * self.divisions[i].size[1] * 3])
-            division = Image.frombytes('RGB', (self.length, self.divisions[i].size[1]), division_bytes)
+            # Debug: Print sizes and bounds
+            print(f"Joining image - index={index}, start={start}, end={end}, size={division_size}")
+
+            division_bytes = shared_mmap[start:end]
+            # Convert bytes to image correctly
+            division = Image.frombytes('RGB', (self.length, division_height), bytes(division_bytes))
             new_image.paste(division, (0, y_offset))
-            y_offset += division.size[1]
-
+            y_offset += division_height
+        
         new_image.save("processed_image.png")
-        existing_shm.close()
-        existing_shm.unlink()
 
     def image_processing(self):
         queue = mp.Queue()
-        shm = shared_memory.SharedMemory(create=True, size=self.length * self.height * 3)
-        shared_array = shm.buf
+        total_size = self.length * self.height * 3
+        with mmap.mmap(-1, total_size) as shared_mmap:
 
-        def worker(division, index, shared_mem_name):
-            existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
-            shared_array = existing_shm.buf
-            processed_image = self.filter(division)
-            division_bytes = processed_image.tobytes()
-            start = index * self.length * division.size[1] * 3
-            shared_array[start:start + len(division_bytes)] = division_bytes
-            queue.put(index)
-            existing_shm.close()
+            def worker(division, index, shared_mmap, queue):
+                processed_image = self.filter(division)
+                division_bytes = np.array(processed_image).tobytes()
+                division_height = division.size[1]
+                division_size = self.length * division_height * 3
+                start = index * division_size
+                end = start + len(division_bytes)
 
-        for i, division in enumerate(self.divisions):
-            p = mp.Process(target=worker, args=(division, i, shm.name))
-            self.processes.append(p)
-            p.start()
+                if end > len(shared_mmap):
+                    end = len(shared_mmap)  # Ensure end does not exceed the mmap size
 
-        for _ in range(self.n):
-            queue.get()
+                # Debug: Print sizes and bounds
+                print(f"Worker {index}: start={start}, end={end}, len(division_bytes)={len(division_bytes)}")
 
-        for p in self.processes:
-            p.join()
+                # Ensure we're writing exactly the expected number of bytes
+                write_length = min(len(division_bytes), end - start)
+                shared_mmap[start:start + write_length] = division_bytes[:write_length]
+                queue.put(index)
 
-        self.join_images(shm.name)
+            for i, division in enumerate(self.divisions):
+                p = mp.Process(target=worker, args=(division, i, shared_mmap, queue))
+                self.processes.append(p)
+                p.start()
+
+            for p in self.processes:
+                p.join()
+
+            self.join_images(shared_mmap, queue)
 
     def cleanup(self, signum, frame):
         print("Interrupt received, cleaning up...")
