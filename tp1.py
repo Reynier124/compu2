@@ -1,9 +1,11 @@
 import multiprocessing as mp
+from multiprocessing import shared_memory
 from PIL import Image, ImageFilter
 import sys
 import signal
 import time
 from tkinter import filedialog
+import os
 
 class ImageProcessing:
 
@@ -31,40 +33,51 @@ class ImageProcessing:
             for i in range(self.n)
         ]
 
-    def join_images(self, shared_array):
+    def join_images(self, shared_mem_name):
         total_height = sum([self.divisions[i].size[1] for i in range(self.n)])
         new_image = Image.new('RGB', (self.length, total_height))
         y_offset = 0
+
+        existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
+        shared_array = existing_shm.buf
+
         for i in range(self.n):
             division_bytes = bytes(shared_array[i * self.length * self.divisions[i].size[1] * 3:(i + 1) * self.length * self.divisions[i].size[1] * 3])
             division = Image.frombytes('RGB', (self.length, self.divisions[i].size[1]), division_bytes)
             new_image.paste(division, (0, y_offset))
             y_offset += division.size[1]
+
         new_image.save("processed_image.png")
+        existing_shm.close()
+        existing_shm.unlink()
 
     def image_processing(self):
         queue = mp.Queue()
-        shared_array = mp.Array('B', self.length * self.height * 3) 
+        shm = shared_memory.SharedMemory(create=True, size=self.length * self.height * 3)
+        shared_array = shm.buf
 
-        def worker(division, index):
+        def worker(division, index, shared_mem_name):
+            existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
+            shared_array = existing_shm.buf
             processed_image = self.filter(division)
             division_bytes = processed_image.tobytes()
             start = index * self.length * division.size[1] * 3
             shared_array[start:start + len(division_bytes)] = division_bytes
-            queue.put(index)  
-            
+            queue.put(index)
+            existing_shm.close()
+
         for i, division in enumerate(self.divisions):
-            p = mp.Process(target=worker, args=(division, i))
+            p = mp.Process(target=worker, args=(division, i, shm.name))
             self.processes.append(p)
             p.start()
 
         for _ in range(self.n):
-            queue.get()  
+            queue.get()
 
         for p in self.processes:
             p.join()
 
-        self.join_images(shared_array)
+        self.join_images(shm.name)
 
     def cleanup(self, signum, frame):
         print("Interrupt received, cleaning up...")
