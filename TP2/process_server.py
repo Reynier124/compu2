@@ -47,7 +47,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, cleanup)
     parser = argparse.ArgumentParser(description="Servidor TCP para el procesamiento de imagenes")
     parser.add_argument("--host4", type=str, default="localhost", help="Dirección IPv4 del servidor")
-    parser.add_argument("--host6", type=str, default="::", help="Dirección IPv6 del servidor")
+    parser.add_argument("--host6", type=str, default="::1", help="Dirección IPv6 del servidor")
     parser.add_argument("--port", type=int, default=7373, help="Puerto del servidor")
     args = parser.parse_args()
 

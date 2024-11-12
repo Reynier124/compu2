@@ -25,10 +25,15 @@ class AsyncConnection:
         await site.start()
 
     async def handle_post(self, request):
-        data = await request.post()
-        image = data['image']
+        data = await request.json()
+        path = data['path']
+        scale = data['scale']
+        name = data['name']
+        path_result = data['path_result']
 
-        processed_image = await self.send_image_to_server(image)
+        all_info = f"{path} -- {scale} -- {name} -- {path_result}"
+
+        processed_image = await self.send_image_to_server(all_info)
 
         return web.Response(text=processed_image)
 
@@ -52,9 +57,9 @@ class AsyncConnection:
 async def main():
     parser = argparse.ArgumentParser(description="Servidor HTTP asíncrono para clientes")
     parser.add_argument("--host", type=str, default="::", help="Dirección IP del servidor")
-    parser.add_argument("--port", type=int, default=7373, help="Puerto del servidor")
+    parser.add_argument("--port", type=int, default=8080, help="Puerto del servidor")
     parser.add_argument("--Ahost", type=str, default="localhost", help="Dirección IP del servidor de procesamiento de imágenes")
-    parser.add_argument("--Aport", type=int, default=8080, help="Puerto del servidor de procesamiento de imágenes")
+    parser.add_argument("--Aport", type=int, default=7373, help="Puerto del servidor de procesamiento de imágenes")
     args = parser.parse_args()
     HOST, PORT = args.host, args.port
     Ahost, Aport = args.Ahost, args.Aport
